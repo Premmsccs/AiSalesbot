@@ -8,7 +8,11 @@ const app = express();
 /* ================================
    🔥 MIDDLEWARE
 ================================ */
-app.use(cors());
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST"],
+  allowedHeaders: ["Content-Type"]
+}));
 app.use(express.json());
 
 /* ================================
