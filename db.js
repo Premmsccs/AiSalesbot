@@ -1,25 +1,21 @@
-const sql = require("mssql");
+const { Pool } = require("pg");
 require("dotenv").config();
 
-const config = {
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  server: process.env.DB_SERVER,
-  database: process.env.DB_DATABASE,
-  port: parseInt(process.env.DB_PORT),
-  options: {
-    encrypt: true, // ✅ FIXED
-    trustServerCertificate: true
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
   }
-};
+});
 
 async function connectDB() {
   try {
-    await sql.connect(config);
-    console.log("MS SQL Connected ✅");
+    const client = await pool.connect();
+    console.log("PostgreSQL Connected ✅");
+    client.release();
   } catch (err) {
     console.log("DB Error ❌", err);
   }
 }
 
-module.exports = { sql, connectDB };
+module.exports = { pool, connectDB };

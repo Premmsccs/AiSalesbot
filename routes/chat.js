@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const axios = require("axios");
-const { sql } = require("../db");
+const { pool } = require("../db"); // ✅ CHANGED (sql → pool)
 
 // Simple in-memory session store (replace with Redis for production)
 let conversationContext = {};
@@ -24,7 +24,7 @@ router.post("/", async (req, res) => {
       "https://api.groq.com/openai/v1/chat/completions",
       {
         model: "llama-3.3-70b-versatile",
-        max_tokens: 5, // 🔥 FIX: avoid long/dirty responses
+        max_tokens: 5,
         messages: [
           {
             role: "system",
@@ -54,7 +54,6 @@ ONLY return one word.
 
     conversationContext[sessionId].lastIntent = intent;
 
-    // 🔥 FIX: fallback if intent fails
     if (!intent) {
       return res.json({
         answer: "🤖 Sorry, I didn’t understand. Try again."
@@ -64,41 +63,19 @@ ONLY return one word.
     /* ================================
        💬 STEP 1: CHAT MODE
     ================================= */
-    // 🔥 FIX: improved condition
     if (intent === "chat" || intent.includes("chat")) {
       const chatResponse = await axios.post(
         "https://api.groq.com/openai/v1/chat/completions",
         {
           model: "llama-3.3-70b-versatile",
-          max_tokens: 500, // 🔥 FIX
+          max_tokens: 500,
           messages: [
             {
               role: "system",
-             content: `
+              content: `
 You are a smart business assistant like ChatGPT.
 
 Talk naturally like a human, not like a report.
-
-Style:
-- Friendly and conversational
-- Simple English
-- Explain like talking to a colleague
-- No strict format
-- No bullet forcing
-- No robotic tone
-
-But still:
-- Use real data
-- Give insights
-- Give suggestions
-
-Example tone:
-"Based on your data, laptops are your top product. But I see 7 items are low in stock — you might face issues soon if demand continues."
-
-IMPORTANT:
-- Be natural
-- Be clear
-- Be helpful
 `
             },
             {
@@ -123,7 +100,7 @@ IMPORTANT:
     }
 
     /* ================================
-       🧠 STEP 2: SQL GENERATION (Context-aware)
+       🧠 STEP 2: SQL GENERATION
     ================================= */
     const aiSQL = await axios.post(
       "https://api.groq.com/openai/v1/chat/completions",
@@ -133,35 +110,32 @@ IMPORTANT:
           {
             role: "system",
             content: `
-You are a SQL Server expert.
+You are a PostgreSQL expert.
 
 Database tables:
-products(productID, productName, price)
-customers(customerID, customerName, city, state, country)
-stores(storeID, storeName, city)
-sales(salesID, productID, customerID, quantity, salestime, storeID)
-inventory(productID, storeID, stock_quantity)
-vendors(vendorID, vendorName, city)
-logistics(shipmentID, salesID, shipment_status, dispatch_date, delivery_date)
+products(productid, productname, price)
+customers(customerid, customername, city, state, country)
+stores(storeid, storename, city)
+sales(salesid, productid, customerid, quantity, salestime, storeid)
+inventory(productid, storeid, stock_quantity)
+vendors(vendorid, vendorname, city)
+logistics(shipmentid, salesid, shipment_status, dispatch_date, delivery_date)
 
 Relationships:
-- sales.productID = products.productID
-- sales.customerID = customers.customerID
-- sales.storeID = stores.storeID
-- inventory.productID = products.productID
-- inventory.storeID = stores.storeID
-- logistics.salesID = sales.salesID
+- sales.productid = products.productid
+- sales.customerid = customers.customerid
+- sales.storeid = stores.storeid
+- inventory.productid = products.productid
+- inventory.storeid = stores.storeid
+- logistics.salesid = sales.salesid
 
 Rules:
-- Use SQL Server syntax (TOP, NOT LIMIT)
+- Use PostgreSQL syntax
+- Use LIMIT instead of TOP
 - Only SELECT queries
 - Always JOIN tables when needed
 - Sales calculation = quantity * price
-- Do NOT use invalid columns
 - No explanation
-
-If user asks a follow-up, use previous context:
-${JSON.stringify(conversationContext[sessionId])}
 `
           },
           { role: "user", content: userQuestion }
@@ -179,16 +153,6 @@ ${JSON.stringify(conversationContext[sessionId])}
     let sqlQuery = aiSQL.data.choices[0].message.content.trim();
     sqlQuery = sqlQuery.replace(/```sql/g, "").replace(/```/g, "");
 
-    // Convert LIMIT → TOP
-    if (sqlQuery.toLowerCase().includes("limit")) {
-      const match = sqlQuery.match(/limit\s+(\d+)/i);
-      if (match) {
-        sqlQuery = sqlQuery
-          .replace(/select/i, `SELECT TOP ${match[1]}`)
-          .replace(/limit\s+\d+/gi, "");
-      }
-    }
-
     console.log("SQL:", sqlQuery);
 
     /* ================================
@@ -196,7 +160,7 @@ ${JSON.stringify(conversationContext[sessionId])}
     ================================= */
     let result;
     try {
-      result = await sql.query(sqlQuery);
+      result = await pool.query(sqlQuery); // ✅ CHANGED
     } catch (dbError) {
       return res.json({
         error: "SQL Error",
@@ -205,7 +169,8 @@ ${JSON.stringify(conversationContext[sessionId])}
       });
     }
 
-    const data = result.recordset;
+    const data = result.rows; // ✅ CHANGED
+
     conversationContext[sessionId].lastQuery = sqlQuery;
     conversationContext[sessionId].lastData = data;
 
@@ -217,7 +182,7 @@ ${JSON.stringify(conversationContext[sessionId])}
        📊 STEP 4: BUSINESS ANALYSIS
     ================================= */
     const totalRevenue = data.reduce(
-      (sum, d) => sum + (d.TotalRevenue || d.totalamount || 0),
+      (sum, d) => sum + (d.totalrevenue || 0),
       0
     );
 
@@ -232,15 +197,7 @@ ${JSON.stringify(conversationContext[sessionId])}
             role: "system",
             content: `
 You are a business analyst.
-
-Provide:
-- Top insight
-- Trend
-- Risk
-- Recommendation
-
-Max 4 bullet points.
-Use context if available: ${JSON.stringify(conversationContext[sessionId])}
+Give insights, trends, risks, recommendations.
 `
           },
           {
@@ -267,8 +224,7 @@ Top Item: ${JSON.stringify(topItem)}
     return res.json({
       query: sqlQuery,
       data: data,
-      answer: insight,
-      context: conversationContext[sessionId]
+      answer: insight
     });
 
   } catch (err) {
@@ -281,4 +237,4 @@ Top Item: ${JSON.stringify(topItem)}
   }
 });
 
-module.exports = router; 
+module.exports = router;

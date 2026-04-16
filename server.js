@@ -9,9 +9,7 @@ const app = express();
    🔥 MIDDLEWARE
 ================================ */
 app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type"]
+  origin: "*", // later you can restrict
 }));
 app.use(express.json());
 
@@ -27,7 +25,7 @@ const chatRoute = require("./routes/chat");
 app.use("/chat", chatRoute);
 
 /* ================================
-   🔥 HEALTH CHECK (NEW - SAFE)
+   🔥 HEALTH CHECK
 ================================ */
 app.get("/", (req, res) => {
   res.send("✅ AI Backend Running...");
@@ -39,5 +37,5 @@ app.get("/", (req, res) => {
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on PORT ${PORT}`);
 });
